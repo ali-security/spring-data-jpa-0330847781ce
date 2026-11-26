@@ -6,12 +6,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Pattern;
 
-import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Sort.NullHandling;
-import org.springframework.data.jpa.domain.JpaSort;
 import org.springframework.lang.Nullable;
 import org.springframework.util.ObjectUtils;
 
@@ -24,12 +21,6 @@ import org.springframework.util.ObjectUtils;
  * @since 3.1
  */
 class JpaQueryTransformerSupport {
-
-	private static final Pattern PUNCTUATION_PATTERN = Pattern.compile(".*((?![._])[\\p{Punct}|\\s])");
-
-	private static final String UNSAFE_PROPERTY_REFERENCE = "Sort expression '%s' must only contain property references or "
-			+ "aliases used in the select clause; If you really want to use something other than that for sorting, please use "
-			+ "JpaSort.unsafe(…)";
 
 	private final Set<String> projectionAliases = new HashSet<>();
 
@@ -60,7 +51,7 @@ class JpaQueryTransformerSupport {
 
 		sort.forEach(order -> {
 
-			checkSortExpression(order);
+			QueryUtils.checkSortExpression(order);
 
 			StringBuilder builder = new StringBuilder();
 
@@ -91,23 +82,6 @@ class JpaQueryTransformerSupport {
 		});
 
 		return tokens;
-	}
-
-	/**
-	 * Check any given {@link JpaSort.JpaOrder#isUnsafe()} order for presence of at least one property offending the
-	 * {@link #PUNCTUATION_PATTERN} and throw an {@link Exception} indicating potential unsafe order by expression.
-	 *
-	 * @param order
-	 */
-	private void checkSortExpression(Sort.Order order) {
-
-		if (order instanceof JpaSort.JpaOrder jpaOrder && jpaOrder.isUnsafe()) {
-			return;
-		}
-
-		if (PUNCTUATION_PATTERN.matcher(order.getProperty()).find()) {
-			throw new InvalidDataAccessApiUsageException(String.format(UNSAFE_PROPERTY_REFERENCE, order));
-		}
 	}
 
 	/**

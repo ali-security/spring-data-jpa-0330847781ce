@@ -24,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.domain.Sort.Order;
@@ -310,6 +311,27 @@ class JpqlQueryTransformerTests {
 
 		assertThatExceptionOfType(InvalidDataAccessApiUsageException.class)
 				.isThrownBy(() -> createQueryFor("select p from Person p", sort));
+	}
+
+	@ParameterizedTest // GH-52, GH-4364
+	@ValueSource(strings = { "sum（id）", "id name", "id name", "id name", "id​name",
+			"id＜100", "id＝100", "id﻿name", "id⁠name", "id−name", "first‬_name",
+			"first‮_name", "id́ name", "id⃝name" })
+	void rejectsUnicodeObfuscatedSortExpressions(String source) {
+
+		Sort sort = Sort.by(source);
+
+		assertThatExceptionOfType(InvalidDataAccessApiUsageException.class)
+				.isThrownBy(() -> createQueryFor("select p from Person p", sort));
+	}
+
+	@ParameterizedTest // GH-52, GH-4364
+	@ValueSource(strings = { "员工编号", "José", "José", "निर्माणतिथि", "วันที่" })
+	void allowsUnicodeSortProperties(String source) {
+
+		Sort sort = Sort.by(source);
+
+		assertThat(createQueryFor("select p from Person p", sort)).endsWith("order by p.%s asc".formatted(source));
 	}
 
 	@Test // DATAJPA-377

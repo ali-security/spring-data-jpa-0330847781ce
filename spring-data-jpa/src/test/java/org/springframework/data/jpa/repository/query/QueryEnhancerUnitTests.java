@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.JpaSort;
@@ -162,6 +163,21 @@ class QueryEnhancerUnitTests {
 
 		StringQuery query = new StringQuery("select p from Person p", true);
 		Sort sort = Sort.by("sum(foo)");
+
+		QueryEnhancer enhancer = getEnhancer(query);
+
+		assertThatThrownBy(() -> enhancer.applySorting(sort, "p")) //
+				.isInstanceOf(InvalidDataAccessApiUsageException.class);
+	}
+
+	@ParameterizedTest // GH-52, GH-4364
+	@ValueSource(strings = { "sum（id）", "id name", "id name", "id name", "id​name",
+			"id＜100", "id＝100", "id﻿name", "id⁠name", "id−name", "first‬_name",
+			"first‮_name", "id́ name", "id⃝name" })
+	void rejectsUnicodeObfuscatedSortExpressionsInNativeQueries(String source) {
+
+		StringQuery query = new StringQuery("select p from Person p", true);
+		Sort sort = Sort.by(source);
 
 		QueryEnhancer enhancer = getEnhancer(query);
 
