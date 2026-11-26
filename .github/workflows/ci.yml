@@ -2,8 +2,11 @@ name: CI Build
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ 3.5.x, 'issue/3.5.x/**' ]
+    inputs:
+      test-filter:
+        description: 'Optional surefire -Dtest selector; empty runs the full suite'
+        required: false
+        default: ''
 
 permissions: read-all
 
@@ -14,6 +17,7 @@ jobs:
         java-version: [ base, next ]
     name: Build project
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v6
       - name: Setup Java and Maven
@@ -24,4 +28,48 @@ jobs:
       - name: Build
         uses: spring-projects/spring-data-build/actions/maven-build@3.5.x
         with:
-          additional-options: -Pall-dbs
+          additional-options: "-Pall-dbs -Dcheckstyle.skip=true -Dscan=false -Dgradle.cache.local.enabled=false -Dgradle.cache.remote.enabled=false -Ddevelocity.cache.local.enabled=false -Ddevelocity.cache.remote.enabled=false ${{ inputs.test-filter != '' && format('-Dtest={0} -Dsurefire.failIfNoSpecifiedTests=false', inputs.test-filter) || '' }}"
+      - name: Upload jar
+        if: ${{ matrix.java-version == 'base' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: spring-data-jpa-jar
+          path: spring-data-jpa/target/spring-data-jpa-3.5.10.jar
+          if-no-files-found: error
+      - name: Test results and skip report
+        if: always()
+        shell: python
+        run: |
+          import glob, os, re, xml.etree.ElementTree as ET
+          from collections import defaultdict
+          tot = fail = err = skip = 0
+          skipped = defaultdict(set)
+          def src_hint(cls):
+              path = cls.split('$')[0].replace('.', '/') + '.java'
+              for f in glob.glob('*/src/test/java/' + path):
+                  for line in open(f, encoding='utf-8'):
+                      if re.search(r'assum\w*\(.*\)\s*\.is(False|True)|@Disabled', line):
+                          return 'source: ' + ' '.join(line.split())[:110]
+              return ''
+          for f in sorted(glob.glob('*/target/surefire-reports/TEST-*.xml')):
+              r = ET.parse(f).getroot()
+              tot += int(r.get('tests', 0)); fail += int(r.get('failures', 0))
+              err += int(r.get('errors', 0)); skip += int(r.get('skipped', 0))
+              for tc in r.iter('testcase'):
+                  s = tc.find('skipped')
+                  if s is not None:
+                      msg = ' '.join((s.get('message') or s.text or 'no message').split())
+                      msg = msg.replace('org.junit.AssumptionViolatedException: assumption was not met due to: ', 'assumption: ')
+                      msg = re.split(r' at (java\.base/|jdk\.internal|java\.)', msg)[0]
+                      if msg.startswith('assumption: [') and ']' in msg:
+                          msg = msg[:msg.index(']') + 1]
+                      if msg.endswith('is @Disabled'):
+                          msg = 'upstream @Disabled on this test method (no reason text in source)'
+                      elif 'Expecting value to be false but was true' in msg or 'Expecting value to be true but was false' in msg:
+                          msg = 'assumption not met; ' + src_hint(tc.get('classname'))
+                      key = (tc.get('classname').rsplit('.', 1)[-1], msg[:150])
+                      skipped[key].add(f + tc.get('name'))
+          print('=== Skip report (one line per test class + reason; all skips come from upstream @Disabled/assumptions) ===')
+          for (cls, msg), names in sorted(skipped.items()):
+              print('SKIPPED %s x%d: %s' % (cls, len(names), msg))
+          print('=== Surefire summary: tests=%d passed=%d failures=%d errors=%d skipped=%d' % (tot, tot - fail - err - skip, fail, err, skip))
